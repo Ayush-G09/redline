@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { AnthropicClient } from '@redline/reviewer'
+import { createClient } from '@redline/reviewer'
 import { loadConfig } from './config'
 import { GitHubClient } from './github'
 import { createServer } from './server'
@@ -15,7 +15,13 @@ try {
 }
 
 const github = new GitHubClient({ appId: config.appId, privateKey: config.privateKey, apiUrl: config.githubApi })
-const llm = new AnthropicClient({ apiKey: config.anthropicKey, model: config.model })
+let llm
+try {
+  llm = createClient(process.env)
+} catch (e) {
+  console.error(`Cannot start: ${(e as Error).message}`)
+  process.exit(2)
+}
 const server = createServer({ config, github, llm, log: (m) => console.log(`${new Date().toISOString()} ${m}`) })
 const port = await server.listen(config.port)
 console.log(`Redline listening on :${port}, reviewing repositories of: ${config.allowedOwners.join(', ')} with ${llm.name}`)

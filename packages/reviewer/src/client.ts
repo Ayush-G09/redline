@@ -12,6 +12,10 @@ export type LlmEvent =
 /** The only thing the reviewer needs from a model: send a prompt, get text back as it is written. */
 export interface LlmClient {
   readonly name: string
+  /** the most prompt text (in characters) this model can take in one go; the reviewer splits bigger changes into several prompts */
+  readonly budgetChars?: number
+  /** how many prompts may be in flight at once (free tiers and local models want 1) */
+  readonly maxConcurrency?: number
   stream(req: LlmRequest): AsyncIterable<LlmEvent>
 }
 

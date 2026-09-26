@@ -43,7 +43,7 @@ const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * review says so in `errors` rather than pretending it found nothing.
  */
 export async function review(client: LlmClient, files: readonly DiffFile[], opts: ReviewOptions = {}): Promise<ReviewResult> {
-  const { title = '(untitled)', budget, maxTokens = 4096, concurrency = 4, retries = 3, backoffMs = 1000, maxFindings = 30, sleep = realSleep } = opts
+  const { title = '(untitled)', budget = client.budgetChars, maxTokens = 4096, concurrency = client.maxConcurrency ?? 4, retries = 3, backoffMs = 1000, maxFindings = 30, sleep = realSleep } = opts
   const { chunks, skipped } = chunkDiff(files, title, budget)
   const result: ReviewResult = { findings: [], dropped: [], skipped, errors: [], usage: { inputTokens: 0, outputTokens: 0, requests: 0 } }
   const seen = new Set<string>()

@@ -1,19 +1,21 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { baselineReview, matchFindings } from '@redline/core'
-import { AnthropicClient } from '@redline/reviewer'
+import { createClient } from '@redline/reviewer'
 import { llmReviewer } from './llm'
 import { builtCases, report, runEval } from './runner'
 
 // npm run eval                       score the rule-based baseline
 // npm run eval -- --detail           also list every miss and wrong comment
-// npm run eval -- --llm              score the language model (needs ANTHROPIC_API_KEY in the environment or a .env file)
-// npm run eval -- --llm --model <id> use a different model (default: REDLINE_MODEL or claude-sonnet-5)
+// npm run eval -- --llm              score a language model (GEMINI_API_KEY in the environment or .env, or a local Ollama)
+// npm run eval -- --llm --provider ollama --model qwen2.5-coder:3b     a model on this machine, no key
+// npm run eval -- --llm --limit 10   only the first 10 cases (the free Gemini tier allows a limited number of requests a day)
 const args = process.argv.slice(2)
 const detail = args.includes('--detail')
 const useLlm = args.includes('--llm')
-const modelArg = args.indexOf('--model')
+const arg = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
 
-const cases = builtCases()
+const limit = Number(arg('--limit') ?? Infinity)
+const cases = builtCases().slice(0, limit)
 console.log(`${cases.length} cases, ${cases.reduce((n, c) => n + c.expected.length, 0)} planted problems\n`)
 
 let name = 'Baseline (pattern rules)'
@@ -22,17 +24,17 @@ let extra = ''
 
 if (useLlm) {
   if (existsSync('.env')) process.loadEnvFile('.env')
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    console.error('ANTHROPIC_API_KEY is not set. Put it in a .env file next to package.json (which is gitignored), or export it, then run again.')
+  let client
+  try {
+    client = createClient(process.env, { provider: arg('--provider'), model: arg('--model') })
+  } catch (e) {
+    console.error((e as Error).message)
     process.exit(2)
   }
-  const model = modelArg >= 0 ? args[modelArg + 1] : process.env.REDLINE_MODEL ?? 'claude-sonnet-5'
-  const client = new AnthropicClient({ apiKey, model })
   const { reviewer, stats } = llmReviewer(client)
-  name = `Language model (${model})`
+  name = `Language model (${client.name})`
   const t0 = Date.now()
-  run = await runEval(reviewer, cases, { concurrency: 3 })
+  run = await runEval(reviewer, cases, { concurrency: client.maxConcurrency ?? 3 })
   const secs = ((Date.now() - t0) / 1000).toFixed(0)
   extra = `\n  ${stats.requests} requests, ${stats.inputTokens} input + ${stats.outputTokens} output tokens, ${secs}s`
   const dropped = Object.entries(stats.dropped).map(([k, v]) => `${v} ${k}`).join(', ')

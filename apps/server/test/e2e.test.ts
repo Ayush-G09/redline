@@ -10,7 +10,7 @@ import { addLineDiff, FakeGitHub, sha } from './fake-github'
 
 const SECRET = 'webhook-secret-for-tests'
 const config = (over: Partial<Config> = {}): Config => ({
-  port: 0, appId: '424242', privateKey: '', webhookSecret: SECRET, anthropicKey: 'unused', model: 'm', githubApi: '', allowedOwners: ['acme'],
+  port: 0, appId: '424242', privateKey: '', webhookSecret: SECRET, githubApi: '', allowedOwners: ['acme'],
   concurrency: 2, postClean: true, maxFiles: 150, maxReviewsPerPrPerHour: 12, ...over,
 })
 

@@ -4,20 +4,78 @@ An AI reviewer for GitHub pull requests that **measures its own quality**. Comme
 only ever land on lines that are really in the diff, and every change to the reviewer is scored against a set of known
 problems, so "is it better?" has a number for an answer.
 
-**Phase 3 of 5**: diff engine, evaluation harness, the language-model reviewer, and the GitHub App with its queue.
-Next: live dashboard, deploy.
+**It costs nothing to run.** Pick a model:
 
-## Run it
+| Model | Cost | Needs | Where it runs |
+| --- | --- | --- | --- |
+| **Gemini** | free tier | a free key from [Google AI Studio](https://aistudio.google.com/apikey), no card | GitHub Action, command line, server |
+| **Ollama** | free | nothing (no key); install Ollama and download a model | your machine: command line |
+| Anthropic | paid | an API key | anywhere |
+
+(An earlier plan used GitHub Models, which GitHub retired on 30 July 2026.)
+
+**Phase 4 of 5** (the free path): diff engine, evaluation harness, model clients, a GitHub Action, a command line tool,
+and an optional self-hosted GitHub App server. Next: live dashboard, deploy.
+
+## Use it
+
+### In a GitHub repository (Action, free with Gemini)
+
+1. Get a free key at https://aistudio.google.com/apikey and add it to your repository as a secret named `GEMINI_API_KEY`
+   (Settings, Secrets and variables, Actions).
+2. Add `.github/workflows/redline.yml`:
+
+```yaml
+name: redline
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: redline-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Ayush-G09/redline@main
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+```
+
+It uses the run's own `GITHUB_TOKEN`: no GitHub App, no private key, no server. It reviews the change once per commit,
+posts one review with inline comments, and skips drafts. A pull request from a **fork** is skipped with an explanation,
+because GitHub gives those runs a read-only token and no secrets. Cancelling on a new push comes from the `concurrency`
+block. Inputs: `provider`, `model`, `max-files`, `post-clean`.
+
+### On your own machine (command line, free, private)
 
 ```bash
 npm install
-npm test                    # 171 tests
-npm start                   # run the GitHub App server (needs the settings in .env.example)
-npm run eval                # score the baseline reviewer
-npm run eval -- --detail    # ...and list every miss and wrong comment
-npm run eval -- --llm       # score the language model (needs ANTHROPIC_API_KEY, see .env.example)
+npm run review                       # this branch against main
+npm run review -- --staged           # only what is staged
+git diff | npm run review -- --stdin
+npm run review -- --fail-on high     # exit code 1 if there is a high-severity comment (for a pre-push hook)
+npm run models                       # which models can I use?
 ```
 
+With **Ollama** (no key, nothing leaves your machine): install it, run `ollama pull qwen2.5-coder:3b`, then
+`REDLINE_PROVIDER=ollama npm run review`. Small local models find fewer problems than a hosted one: measure yours with
+`npm run eval -- --llm --provider ollama`.
+
+Settings go in `.env` (see `.env.example`).
+
+## Run the tests
+
+```bash
+npm test                    # 233 tests
+npm run eval                # score the baseline reviewer
+npm run eval -- --detail    # ...and list every miss and wrong comment
+npm run eval -- --llm --limit 10     # score the model you configured (--limit saves free-tier requests)
+npm start                   # the self-hosted GitHub App server (see below)
+```
 ## What is here
 
 - **Diff parser** (`packages/core/src/diff.ts`): unified diff to files, hunks and exact old/new line numbers. Handles new,
@@ -44,11 +102,19 @@ npm run eval -- --llm       # score the language model (needs ANTHROPIC_API_KEY,
 - **Reviewer**: prompts run in parallel (bounded), duplicates across prompts are merged, comments are ordered by
   severity, and busy providers are retried with backoff (honouring `retry-after`). If it still fails, the result says the
   review is incomplete instead of reporting "nothing found". Once comments have streamed out, it does not start over.
-- **Provider**: a small `LlmClient` interface. `AnthropicClient` speaks the Messages API with streaming over plain
-  `fetch`; the key is only ever a request header, never logged or put in an error. A scripted model runs the whole path in tests.
+- **Providers**: a small `LlmClient` interface with three implementations, all over plain `fetch` with streaming, and
+  none logging or echoing a key.
+  - `GeminiClient`: the key goes in a header (never the URL). Google repeats running token totals in every chunk, so only
+    the last is counted. Rate limits are retried after the delay Google names, but a used-up **daily** quota, or a wait
+    over 90 s, stops with a message saying what to do. The default prompt is large so most pull requests are one request
+    (the free tier counts requests).
+  - `OllamaClient`: asks for a bigger context window than Ollama's default (which silently cuts off the start of a long
+    prompt), sizes prompts to fit it, and explains how to fix "not running" and "model not downloaded".
+  - `AnthropicClient`: the paid option.
+  A scripted model runs the whole path in tests.
 
 The pipeline is tested end to end with a scripted model that answers in awkward ways (prose, fences, tiny chunks),
-invents places, is a line or two off, or is unavailable. **No real model has been scored yet**: that needs an API key.
+invents places, is a line or two off, or is unavailable. **No real model has been scored yet.**
 
 ## The GitHub App (`apps/server`)
 
@@ -76,7 +142,7 @@ GitHub -- webhook --> verify signature --> checks --> queue (one slot per pull r
 It is tested against a fake GitHub server that speaks the real HTTP API and checks what GitHub checks (the JWT signature and
 lifetime, that the commit is the pull request's head, that every comment is on a line in the diff), with a scripted model.
 
-### Create the GitHub App
+### Create the GitHub App (only for self-hosting; the Action above needs none of this)
 
 1. GitHub, Settings, Developer settings, GitHub Apps, **New GitHub App**.
 2. **Webhook URL**: your server's `https://<host>/webhooks/github`. **Webhook secret**: make one up (this is
@@ -93,7 +159,7 @@ lifetime, that the commit is the pull request's head, that every comment is on a
 | Reviewer | Precision | Recall | F1 |
 | --- | --- | --- | --- |
 | Baseline (pattern rules) | 86% | 44% | 59% |
-| Language model | not run yet | | |
+| Language model (Gemini / Ollama) | not run yet | | |
 
 It finds what a pattern can (eval, hardcoded keys, SQL by string-joining, `= ` in an `if`) and none of what needs
 understanding (a missing `await`, swapped arguments, an off-by-one, a missing authorization check). It also raises two

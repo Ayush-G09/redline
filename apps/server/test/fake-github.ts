@@ -31,6 +31,8 @@ export class FakeGitHub {
   rejectTokenOnce = false
   /** status to return when the diff is requested (e.g. 406 too large) */
   diffStatus = 200
+  /** answer review posts with 403, as when the workflow was not given write permission */
+  forbidReviews = false
   /** refuse inline comments (422) as if a position could not be resolved */
   rejectInline = false
   /** runs on every GET of a pull request, before answering (to change it "while the reviewer works") */
@@ -55,6 +57,9 @@ export class FakeGitHub {
     this.pulls.set(key, { title: 'A change', state: 'open', draft: false, headSha: sha(key + Math.random()), reviews: [], ...p })
     return key
   }
+
+  /** accept this token as if GitHub had issued it (what a GitHub Action run is given) */
+  allowToken(token: string) { this.validTokens.add(token) }
 
   async start() {
     this.server = createServer(async (req, res) => {
@@ -109,6 +114,7 @@ export class FakeGitHub {
         return json(200, pull.reviews.slice((page - 1) * per, page * per).map((r) => ({ id: r.id, body: r.body, commit_id: r.commit_id, user: r.user })))
       }
       if (m[4] && req.method === 'POST') {
+        if (this.forbidReviews) return json(403, { message: 'Resource not accessible by integration' })
         if (body.commit_id !== pull.headSha) return json(422, { message: 'Unprocessable Entity: commit_id is not part of the pull request' })
         const comments = (body.comments ?? []) as { path: string; line: number; side: string; body: string }[]
         const ok = comments.length ? commentableLines(parseDiff(pull.diff)) : new Map<string, Set<number>>()

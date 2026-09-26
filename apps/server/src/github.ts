@@ -24,8 +24,11 @@ export interface ReviewComment {
 export interface ExistingReview { id: number; body: string; author: string; commitId: string }
 
 export interface GitHubOptions {
-  appId: string
-  privateKey: string
+  /** a GitHub App's id and private key (the server), or... */
+  appId?: string
+  privateKey?: string
+  /** ...a ready-made token such as the one a GitHub Action gets (then no app or key is needed) */
+  token?: string
   apiUrl?: string
   fetchImpl?: typeof fetch
   now?: () => number
@@ -52,12 +55,14 @@ export class GitHubClient {
   }
 
   private async token(installationId: number, force = false): Promise<string> {
+    if (this.o.token) return this.o.token
+    if (!this.o.appId || !this.o.privateKey) throw new GitHubError('GitHubClient needs either a token or an app id and private key', 500)
     const have = this.tokens.get(installationId)
     if (!force && have && have.expiresAt - this.now() > 60_000) return have.value
     const pending = this.inflight.get(installationId)
     if (pending) return pending // many jobs starting at once share one token request
     const p = (async () => {
-      const res = await this.send(`/app/installations/${installationId}/access_tokens`, { method: 'POST', bearer: appJwt(this.o.appId, this.o.privateKey, this.now()) })
+      const res = await this.send(`/app/installations/${installationId}/access_tokens`, { method: 'POST', bearer: appJwt(this.o.appId as string, this.o.privateKey as string, this.now()) })
       const j = (await res.json()) as { token?: string; expires_at?: string }
       if (!j.token || !j.expires_at) throw new GitHubError('GitHub returned no installation token', 502)
       this.tokens.set(installationId, { value: j.token, expiresAt: Date.parse(j.expires_at) })
@@ -105,7 +110,7 @@ export class GitHubClient {
     try {
       return await this.send(path, { ...init, bearer: await this.token(installationId) })
     } catch (e) {
-      if (e instanceof GitHubError && e.status === 401) return this.send(path, { ...init, bearer: await this.token(installationId, true) })
+      if (e instanceof GitHubError && e.status === 401 && !this.o.token) return this.send(path, { ...init, bearer: await this.token(installationId, true) })
       throw e
     }
   }

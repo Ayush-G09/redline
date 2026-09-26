@@ -171,7 +171,7 @@ describe('format', () => {
 })
 
 describe('loadConfig', () => {
-  const ok = { GITHUB_APP_ID: '1', GITHUB_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----', GITHUB_WEBHOOK_SECRET: 'shh-very-secret', ANTHROPIC_API_KEY: 'sk-ant-xyz', ALLOWED_OWNERS: 'Ayush-G09, Someone' }
+  const ok = { GITHUB_APP_ID: '1', GITHUB_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----', GITHUB_WEBHOOK_SECRET: 'shh-very-secret', ALLOWED_OWNERS: 'Ayush-G09, Someone' }
   it('reads settings, lowercases owners, restores key newlines, and applies defaults', () => {
     const c = loadConfig(ok)
     expect(c).toMatchObject({ appId: '1', allowedOwners: ['ayush-g09', 'someone'], port: 3200, concurrency: 2, postClean: true, maxReviewsPerPrPerHour: 12 })
@@ -182,7 +182,7 @@ describe('loadConfig', () => {
     try { loadConfig({ ...ok, GITHUB_WEBHOOK_SECRET: '', ALLOWED_OWNERS: '' }) } catch (e) { msg = (e as Error).message }
     expect(msg).toContain('GITHUB_WEBHOOK_SECRET')
     expect(msg).toContain('ALLOWED_OWNERS')
-    expect(msg).not.toContain('sk-ant-xyz')
+    expect(msg).not.toContain('shh-very-secret')
   })
   it('refuses a key that is not a PEM, a negative number, and an owner list with nothing in it', () => {
     expect(() => loadConfig({ ...ok, GITHUB_PRIVATE_KEY: 'nope' })).toThrow(/PEM/)

@@ -1,0 +1,1 @@
+{ "name": "@redline/cli", "version": "0.1.0", "private": true, "type": "module", "scripts": { "typecheck": "tsc -p .", "review": "tsx src/main.ts" }, "dependencies": { "@redline/core": "*", "@redline/reviewer": "*" } }

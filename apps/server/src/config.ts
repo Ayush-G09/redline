@@ -3,8 +3,6 @@ export interface Config {
   appId: string
   privateKey: string
   webhookSecret: string
-  anthropicKey: string
-  model: string
   githubApi: string
   /** only these accounts' repositories are ever reviewed (each review costs money) */
   allowedOwners: string[]
@@ -17,7 +15,7 @@ export interface Config {
 
 /** Reads settings from the environment. On a problem it lists the names that are wrong, never their values. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const missing = ['GITHUB_APP_ID', 'GITHUB_PRIVATE_KEY', 'GITHUB_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'ALLOWED_OWNERS'].filter((k) => !env[k]?.trim())
+  const missing = ['GITHUB_APP_ID', 'GITHUB_PRIVATE_KEY', 'GITHUB_WEBHOOK_SECRET', 'ALLOWED_OWNERS'].filter((k) => !env[k]?.trim())
   if (missing.length) throw new Error(`Missing settings: ${missing.join(', ')} (see .env.example)`)
   const int = (k: string, d: number) => {
     const v = env[k]
@@ -35,8 +33,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     appId: (env.GITHUB_APP_ID as string).trim(),
     privateKey,
     webhookSecret: env.GITHUB_WEBHOOK_SECRET as string,
-    anthropicKey: env.ANTHROPIC_API_KEY as string,
-    model: env.REDLINE_MODEL?.trim() || 'claude-sonnet-5',
     githubApi: env.GITHUB_API_URL?.trim() || 'https://api.github.com',
     allowedOwners: owners,
     concurrency: Math.max(1, int('CONCURRENCY', 2)),

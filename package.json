@@ -8,9 +8,12 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w packages/reviewer && npm run typecheck -w packages/eval && npm run typecheck -w apps/server",
+    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w packages/reviewer && npm run typecheck -w packages/eval && npm run typecheck -w apps/server && npm run typecheck -w apps/action && npm run typecheck -w apps/cli",
     "eval": "npm run eval -w packages/eval",
-    "start": "npm run start -w apps/server"
+    "start": "npm run start -w apps/server",
+    "review": "tsx apps/cli/src/main.ts",
+    "models": "tsx apps/cli/src/main.ts models",
+    "build:action": "esbuild apps/action/src/main.ts --bundle --platform=node --target=node20 --format=esm --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\" --outfile=dist/action.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -18,6 +21,7 @@
     "@types/diff": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "esbuild": "^0.24.0"
   }
 }

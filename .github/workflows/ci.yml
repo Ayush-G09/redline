@@ -11,3 +11,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run eval
+      - name: The committed action bundle must match the source
+        run: |
+          npm run build:action
+          git diff --exit-code dist/action.mjs || (echo "dist/action.mjs is out of date: run npm run build:action and commit it" && exit 1)

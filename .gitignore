@@ -1,5 +1,6 @@
 node_modules
-dist
+dist/*
+!dist/action.mjs
 .env
 *.log
 packages/eval/runs

@@ -1,0 +1,28 @@
+name: Redline review
+description: An AI reviewer for pull requests. Leaves inline comments, only on lines that are really in the change.
+author: Ayush-G09
+branding:
+  icon: eye
+  color: red
+inputs:
+  provider:
+    description: "gemini (default when GEMINI_API_KEY is set) or anthropic. (ollama runs locally, not in Actions.)"
+    required: false
+  model:
+    description: Model name. Defaults to a sensible one for the provider.
+    required: false
+  max-files:
+    description: Skip pull requests that touch more files than this.
+    required: false
+    default: "150"
+  post-clean:
+    description: Post a short review even when nothing was found ("true" or "false").
+    required: false
+    default: "true"
+  token:
+    description: GitHub token used to read the change and post the review.
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: node20
+  main: dist/action.mjs
