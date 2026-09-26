@@ -2,10 +2,13 @@
   "name": "redline",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w packages/eval",
+    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w packages/reviewer && npm run typecheck -w packages/eval",
     "eval": "npm run eval -w packages/eval"
   },
   "devDependencies": {

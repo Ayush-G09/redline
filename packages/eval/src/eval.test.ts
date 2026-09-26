@@ -73,3 +73,72 @@ describe('the baseline reviewer (the number to beat)', () => {
     expect(baselineReview(c('clean-docs').files)).toEqual([])
   })
 })
+
+// ------------------------------------------------------------------------------------------------------------
+// The whole language-model path (prompt, streaming, parsing, checking, merging, scoring) with a scripted model
+// that stands in for the real one. It "reads" the prompt the way a model would: it only knows the case from the title.
+// ------------------------------------------------------------------------------------------------------------
+import { pieces, ScriptedClient } from '@redline/reviewer'
+import { llmReviewer } from './llm'
+
+const byTitle = new Map(cases.map((c) => [c.title, c]))
+const asJson = (c: (typeof cases)[number], line = (l: number) => l) => c.expected.map((e) => JSON.stringify({ path: e.path, line: line(e.line), kind: e.kind, severity: 'high', message: 'planted' })).join('\n')
+const titleOf = (user: string) => /Pull request title: (.*)/.exec(user)?.[1] ?? ''
+
+describe('the language-model path, end to end, with a scripted model', () => {
+  it('a model that answers correctly, in the awkward ways real models do, scores 100%', async () => {
+    const client = new ScriptedClient((req) => {
+      const c = byTitle.get(titleOf(req.user))
+      if (!c || c.expected.length === 0) return { chunks: ['Looks good to me, nothing to report.'] }
+      return { chunks: pieces('Here is my review:\n```json\n' + asJson(c) + '\n```\nLet me know!', 11), usage: { inputTokens: 500, outputTokens: 40 } }
+    })
+    const { reviewer, stats } = llmReviewer(client)
+    const run = await runEval(reviewer, cases, { concurrency: 4 })
+    expect(run.score).toMatchObject({ precision: 1, recall: 1, fp: 0, fn: 0, falseAlarms: 0 })
+    expect(stats).toMatchObject({ requests: cases.length, errors: [], inputTokens: 500 * (cases.length - 0 - cases.filter((c) => c.expected.length === 0).length) })
+  })
+
+  it('a model that invents places does not get credit or hurt the score: the inventions are dropped and counted', async () => {
+    const client = new ScriptedClient((req) => {
+      const c = byTitle.get(titleOf(req.user))
+      if (!c) return { chunks: [] }
+      const invented = JSON.stringify({ path: c.files[0].path, line: 4000, kind: 'bug', severity: 'high', message: 'made up' })
+      const ghost = JSON.stringify({ path: 'src/ghost.ts', line: 1, kind: 'security', severity: 'high', message: 'made up' })
+      return { chunks: [asJson(c), invented, ghost].filter(Boolean).join('\n').split('\n') }
+    })
+    const { reviewer, stats } = llmReviewer(client)
+    const run = await runEval(reviewer, cases)
+    expect(run.score).toMatchObject({ precision: 1, recall: 1 })
+    expect(stats.dropped['line-not-in-diff']).toBe(cases.length)
+    expect(stats.dropped['unknown-path']).toBe(cases.length)
+  })
+
+  it('a model that is right but one line off still gets credit (within tolerance), two lines off does too, ten does not', async () => {
+    for (const [off, hit] of [[1, true], [2, true], [10, false]] as const) {
+      const client = new ScriptedClient((req) => {
+        const c = byTitle.get(titleOf(req.user))
+        return { chunks: c ? [asJson(c, (l) => l + off)] : [] }
+      })
+      const run = await runEval(llmReviewer(client).reviewer, cases)
+      // moving a comment can push it outside the diff, where it is dropped, so compare against what could be placed at all
+      if (hit) expect(run.score.recall, `off by ${off}`).toBeGreaterThan(0.6)
+      else expect(run.score.recall, `off by ${off}`).toBeLessThan(0.2)
+    }
+  })
+
+  it('a provider outage is visible in the stats, and the run is not silently scored as "found nothing"', async () => {
+    const { RetriableError } = await import('@redline/reviewer')
+    const client = new ScriptedClient(() => ({ first: new RetriableError('overloaded') }))
+    const { reviewer, stats } = llmReviewer(client)
+    // no waiting between retries in a test
+    const run = await runEval(async (files, meta) => {
+      const { review } = await import('@redline/reviewer')
+      const r = await review(client, files, { title: meta.title, sleep: async () => {} })
+      stats.errors.push(...r.errors)
+      return r.findings
+    }, cases.slice(0, 5))
+    expect(stats.errors.length).toBe(5)
+    expect(run.score.tp).toBe(0)
+    void reviewer
+  })
+})

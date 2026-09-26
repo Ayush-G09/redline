@@ -14,12 +14,18 @@ export interface Run {
   results: (CaseResult & { title: string })[]
 }
 
-export async function runEval(review: Reviewer, cases: BuiltCase[] = builtCases()): Promise<Run> {
-  const results: Run['results'] = []
-  for (const c of cases) {
-    const findings = await review(c.files, { id: c.id, title: c.title })
-    results.push({ id: c.id, title: c.title, files: c.files, findings, expected: c.expected })
+export async function runEval(review: Reviewer, cases: BuiltCase[] = builtCases(), { concurrency = 1 }: { concurrency?: number } = {}): Promise<Run> {
+  const results: Run['results'] = new Array(cases.length)
+  let next = 0
+  const worker = async () => {
+    while (next < cases.length) {
+      const i = next++
+      const c = cases[i]
+      const findings = await review(c.files, { id: c.id, title: c.title })
+      results[i] = { id: c.id, title: c.title, files: c.files, findings, expected: c.expected }
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(concurrency, cases.length) }, worker))
   return { score: score(results), results }
 }
 
