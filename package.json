@@ -8,8 +8,9 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w packages/reviewer && npm run typecheck -w packages/eval",
-    "eval": "npm run eval -w packages/eval"
+    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w packages/reviewer && npm run typecheck -w packages/eval && npm run typecheck -w apps/server",
+    "eval": "npm run eval -w packages/eval",
+    "start": "npm run start -w apps/server"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

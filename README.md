@@ -4,14 +4,15 @@ An AI reviewer for GitHub pull requests that **measures its own quality**. Comme
 only ever land on lines that are really in the diff, and every change to the reviewer is scored against a set of known
 problems, so "is it better?" has a number for an answer.
 
-**Phase 2 of 5**: diff engine, evaluation harness, and the language-model reviewer. Next: GitHub App and queue,
-live dashboard, deploy.
+**Phase 3 of 5**: diff engine, evaluation harness, the language-model reviewer, and the GitHub App with its queue.
+Next: live dashboard, deploy.
 
 ## Run it
 
 ```bash
 npm install
-npm test                    # 103 tests
+npm test                    # 171 tests
+npm start                   # run the GitHub App server (needs the settings in .env.example)
 npm run eval                # score the baseline reviewer
 npm run eval -- --detail    # ...and list every miss and wrong comment
 npm run eval -- --llm       # score the language model (needs ANTHROPIC_API_KEY, see .env.example)
@@ -48,6 +49,44 @@ npm run eval -- --llm       # score the language model (needs ANTHROPIC_API_KEY,
 
 The pipeline is tested end to end with a scripted model that answers in awkward ways (prose, fences, tiny chunks),
 invents places, is a line or two off, or is unavailable. **No real model has been scored yet**: that needs an API key.
+
+## The GitHub App (`apps/server`)
+
+```
+GitHub -- webhook --> verify signature --> checks --> queue (one slot per pull request) --> review --> post one review
+```
+
+- **Webhook**: the signature (HMAC-SHA256 over the raw bytes) is checked in constant time before anything else. Then the
+  payload shape (names that could rewrite an API path are refused), that the owner is on `ALLOWED_OWNERS`, that it is not a
+  draft, that this delivery was not already handled, and that the pull request has not used its hourly allowance.
+- **Queue**: one job per pull request. A newer push drops any job still waiting and tells the running one to stop, so only the
+  latest commit is ever reviewed. Different pull requests run in parallel up to a limit. Rate limits and server errors are
+  retried with backoff (using GitHub's own wait time when it gives one).
+- **Reviewing**: before spending model time, and again just before posting, it checks the pull request is still open and
+  still at the commit it was asked about. Its own earlier review of a commit is recognised by a hidden marker, so a retry or
+  a redelivery never posts twice. The result is one GitHub review with inline comments on the right lines.
+- **When something goes wrong**: if GitHub refuses the inline comments (422), the findings are listed in the review summary
+  instead of lost. If the model is unavailable, the review is posted marked **incomplete**, never as "nothing found". A diff
+  that is too large or unreadable gets a note. Huge changes are skipped.
+- **GitHub client**: signs in as the app (RS256 JWT), gets installation tokens and reuses them until shortly before they
+  expire, shares one token request between simultaneous jobs, and replaces a token GitHub rejects.
+- **Not persistent yet**: the queue lives in memory. If the server restarts, waiting jobs are lost (GitHub can redeliver from
+  its webhook page, and the next push queues a new one).
+
+It is tested against a fake GitHub server that speaks the real HTTP API and checks what GitHub checks (the JWT signature and
+lifetime, that the commit is the pull request's head, that every comment is on a line in the diff), with a scripted model.
+
+### Create the GitHub App
+
+1. GitHub, Settings, Developer settings, GitHub Apps, **New GitHub App**.
+2. **Webhook URL**: your server's `https://<host>/webhooks/github`. **Webhook secret**: make one up (this is
+   `GITHUB_WEBHOOK_SECRET`). For local testing, expose your machine with a tunnel and use that URL.
+3. **Repository permissions**: *Pull requests* read and write, *Contents* read, *Metadata* read. Nothing else.
+4. **Subscribe to events**: *Pull request*.
+5. Create it, note the **App ID**, then **Generate a private key** (downloads a `.pem`).
+6. **Install** the app on the repositories you want reviewed.
+7. Put the values in `.env` (see `.env.example`): the key on one line with `
+` for line breaks.
 
 ## Current numbers
 
