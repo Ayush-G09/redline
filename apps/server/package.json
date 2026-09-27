@@ -1,5 +1,16 @@
 {
-  "name": "@redline/server", "version": "0.1.0", "private": true, "type": "module",
-  "scripts": { "dev": "tsx watch src/main.ts", "start": "tsx src/main.ts", "typecheck": "tsc -p ." },
-  "dependencies": { "@redline/core": "*", "@redline/reviewer": "*" }
+  "name": "@redline/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@redline/core": "*",
+    "@redline/reviewer": "*",
+    "ws": "^8.18.0"
+  }
 }

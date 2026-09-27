@@ -2,6 +2,7 @@ import { DiffParseError, parseDiff } from '@redline/core'
 import type { DiffFile } from '@redline/core'
 import { review } from '@redline/reviewer'
 import type { LlmClient, ReviewOptions, ReviewResult } from '@redline/reviewer'
+import type { Dashboard } from './dashboard'
 import { hasMarker, marker, summary, toComments } from './format'
 import { GitHubError } from './github'
 import type { GitHubClient } from './github'
@@ -31,6 +32,8 @@ export interface WorkerDeps {
   maxFiles?: number
   /** overrides for the model call (retry timing, budget), mainly for tests */
   reviewOptions?: Partial<ReviewOptions>
+  /** streams progress to the live dashboard and supplies learned "don't repeat this" instructions, if given */
+  dashboard?: Dashboard
   log?: (msg: string) => void
 }
 
@@ -40,9 +43,10 @@ export interface WorkerDeps {
  * commit we were asked about: a push in the meantime makes this review out of date (a newer job will have been queued).
  */
 export async function reviewPull(deps: WorkerDeps, job: ReviewJob, signal: AbortSignal): Promise<Outcome> {
-  const { github, llm, postClean = true, maxFiles = 150, log = () => {}, reviewOptions = {} } = deps
+  const { github, llm, postClean = true, maxFiles = 150, log = () => {}, reviewOptions = {}, dashboard } = deps
   const { owner, repo, number: n, installationId: inst } = job
   const where = `${owner}/${repo}#${n}@${job.headSha.slice(0, 7)}`
+  const dashKey = `${owner}/${repo}#${n}`.toLowerCase()
 
   const pull = await github.getPull(inst, owner, repo, n)
   if (pull.state !== 'open') return { type: 'skipped', reason: 'closed' }
@@ -78,7 +82,15 @@ export async function reviewPull(deps: WorkerDeps, job: ReviewJob, signal: Abort
   }
   if (signal.aborted) return { type: 'cancelled' }
 
-  const result: ReviewResult = await review(llm, files, { ...reviewOptions, title: pull.title, signal })
+  dashboard?.jobStart(dashKey, pull.title)
+  const learned = dashboard?.feedback.learnedInstructions() || undefined
+  const result: ReviewResult = await review(llm, files, {
+    ...reviewOptions,
+    title: pull.title,
+    signal,
+    extraSystem: learned,
+    onFinding: (f) => { dashboard?.finding(dashKey, f); reviewOptions.onFinding?.(f) },
+  })
   if (signal.aborted) return { type: 'cancelled' }
 
   // a push while the model was working makes this review describe code that is no longer there

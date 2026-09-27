@@ -14,8 +14,8 @@ problems, so "is it better?" has a number for an answer.
 
 (An earlier plan used GitHub Models, which GitHub retired on 30 July 2026.)
 
-**Phase 4 of 5** (the free path): diff engine, evaluation harness, model clients, a GitHub Action, a command line tool,
-and an optional self-hosted GitHub App server. Next: live dashboard, deploy.
+**Phase 4 of 5**: diff engine, evaluation harness, model clients, a GitHub Action, a command line tool, a self-hosted
+GitHub App server, and a live dashboard that streams reviews and learns from accept/dismiss. Next: deploy.
 
 ## Use it
 
@@ -70,7 +70,7 @@ Settings go in `.env` (see `.env.example`).
 ## Run the tests
 
 ```bash
-npm test                    # 233 tests
+npm test                    # 265 tests
 npm run eval                # score the baseline reviewer
 npm run eval -- --detail    # ...and list every miss and wrong comment
 npm run eval -- --llm --limit 10     # score the model you configured (--limit saves free-tier requests)
@@ -141,6 +141,20 @@ GitHub -- webhook --> verify signature --> checks --> queue (one slot per pull r
 
 It is tested against a fake GitHub server that speaks the real HTTP API and checks what GitHub checks (the JWT signature and
 lifetime, that the commit is the pull request's head, that every comment is on a line in the diff), with a scripted model.
+
+### Live dashboard (self-hosted server only)
+
+Open `http://<host>/` while `npm start` is running. It shows every review as it happens: the pull request, the model's
+comments streaming in one by one (not a final dump once the review ends), and **Accept**/**Dismiss** on each. Dismissing
+a comment does two things:
+1. it is remembered for this project, grouped by the *pattern* of the comment (its kind, plus the shape of the message
+   with specific names and numbers removed), not just that one exact line;
+2. once the same pattern has been dismissed twice, the next review's prompt is told, by name, not to repeat it. This can
+   only make the reviewer quieter, never louder: a bad dismissal costs a missed comment, never a wrong one.
+
+Accepting a finding of an already-learned pattern can undo the dismissal, so a team that changes its mind is not stuck.
+`GET /api/feedback` shows what has been learned for a running server; `packages/core/src/feedback.ts` has the matching
+logic and is the most heavily tested file for this feature (including deliberately broken versions that fail the tests).
 
 ### Create the GitHub App (only for self-hosting; the Action above needs none of this)
 

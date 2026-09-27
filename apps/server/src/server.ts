@@ -1,7 +1,13 @@
 import { createServer as createHttp } from 'node:http'
 import type { IncomingMessage, Server } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { WebSocketServer } from 'ws'
+import type { WebSocket } from 'ws'
 import type { LlmClient, ReviewOptions } from '@redline/reviewer'
 import type { Config } from './config'
+import { Dashboard } from './dashboard'
+import type { DashboardEvent } from './dashboard'
 import type { GitHubClient } from './github'
 import { KeyedQueue } from './queue'
 import type { QueueOptions } from './queue'
@@ -16,8 +22,12 @@ export interface ServerDeps {
   log?: (msg: string) => void
   queue?: Partial<QueueOptions>
   reviewOptions?: Partial<ReviewOptions>
+  /** the live dashboard: streams review progress and learns from accept/dismiss. A fresh one is made if not given. */
+  dashboard?: Dashboard
   now?: () => number
 }
+
+const DASHBOARD_HTML = fileURLToPath(new URL('../public/dashboard.html', import.meta.url))
 
 const MAX_BODY = 2 * 1024 * 1024
 const ACTIONS = new Set(['opened', 'synchronize', 'reopened', 'ready_for_review'])
@@ -44,6 +54,7 @@ export interface RedlineServer {
   http: Server
   queue: KeyedQueue<ReviewJob>
   outcomes: { key: string; outcome: Outcome | { type: 'failed'; error: string }; at: number }[]
+  dashboard: Dashboard
   listen(port: number): Promise<number>
   close(): Promise<void>
 }
@@ -58,14 +69,24 @@ export function createServer(deps: ServerDeps): RedlineServer {
   const { config, github, llm } = deps
   const log = deps.log ?? (() => {})
   const now = deps.now ?? Date.now
+  const dashboard = deps.dashboard ?? new Dashboard()
   const outcomes: RedlineServer['outcomes'] = []
   const record = (key: string, outcome: RedlineServer['outcomes'][number]['outcome']) => { outcomes.push({ key, outcome, at: now() }); if (outcomes.length > 50) outcomes.shift() }
 
   const queue = new KeyedQueue<ReviewJob>(
     async (job, { signal }) => {
       const key = `${job.owner}/${job.repo}#${job.number}`
-      const outcome = await reviewPull({ github, llm, postClean: config.postClean, maxFiles: config.maxFiles, log, reviewOptions: deps.reviewOptions }, job, signal)
-      record(key, outcome)
+      const dashKey = key.toLowerCase()
+      try {
+        const outcome = await reviewPull({ github, llm, postClean: config.postClean, maxFiles: config.maxFiles, log, reviewOptions: deps.reviewOptions, dashboard }, job, signal)
+        record(key, outcome)
+        const comments = outcome.type === 'reviewed' ? outcome.comments : 0
+        const incomplete = outcome.type === 'reviewed' && outcome.incomplete
+        dashboard.jobDone(dashKey, outcome.type, comments, incomplete)
+      } catch (e) {
+        dashboard.jobFailed(dashKey, (e as Error).message)
+        throw e
+      }
     },
     {
       concurrency: config.concurrency, retries: 3, backoffMs: 2000,
@@ -76,6 +97,12 @@ export function createServer(deps: ServerDeps): RedlineServer {
       ...deps.queue,
     },
   )
+
+  // ---- live dashboard: WebSocket broadcast + the small REST API it uses ----
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 })
+  const sockets = new Set<WebSocket>()
+  const send = (ws: WebSocket, e: DashboardEvent) => { try { ws.send(JSON.stringify(e)) } catch { /* client is gone */ } }
+  const offEvent = dashboard.onEvent((e) => { for (const ws of sockets) send(ws, e) })
 
   const delivered = new Set<string>()
   const recent = new Map<string, number[]>() // pull request -> when we accepted reviews for it
@@ -90,6 +117,23 @@ export function createServer(deps: ServerDeps): RedlineServer {
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (req.method === 'GET' && url.pathname === '/health') {
         return send(200, { ok: true, queue: queue.stats, waitingOrRunning: queue.size, failed: queue.failed.length, recent: outcomes.slice(-10) })
+      }
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/dashboard')) {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        try { return res.end(await readFile(DASHBOARD_HTML)) } catch { res.statusCode = 500; return res.end('dashboard page missing') }
+      }
+      if (req.method === 'GET' && url.pathname === '/api/findings') {
+        const key = url.searchParams.get('key') ?? undefined
+        return send(200, { findings: dashboard.recentFindings(key) })
+      }
+      if (req.method === 'GET' && url.pathname === '/api/feedback') {
+        return send(200, dashboard.feedback.snapshot())
+      }
+      if (req.method === 'POST' && /^\/api\/findings\/[^/]+\/(accept|dismiss)$/.test(url.pathname)) {
+        const [, id, verb] = /^\/api\/findings\/([^/]+)\/(accept|dismiss)$/.exec(url.pathname) as RegExpExecArray
+        const result = dashboard.act(id, verb === 'accept' ? 'accepted' : 'dismissed')
+        if (!result) return send(404, { error: 'unknown finding, or it was already acted on' })
+        return send(200, { ok: true, finding: result })
       }
       if (req.method !== 'POST' || url.pathname !== '/webhooks/github') return send(404, { error: 'not found' })
 
@@ -139,10 +183,25 @@ export function createServer(deps: ServerDeps): RedlineServer {
     }
   })
 
+  http.on('upgrade', (req: IncomingMessage, socket, head) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    if (url.pathname !== '/dashboard/live') { socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); socket.destroy(); return }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      sockets.add(ws)
+      // a fresh viewer sees recent history at once, then live updates as they happen
+      send(ws, { type: 'snapshot', findings: dashboard.recentFindings(undefined, 200) })
+      ws.on('close', () => sockets.delete(ws))
+      ws.on('error', () => sockets.delete(ws))
+      ws.on('message', () => { /* the dashboard only listens; actions go through the REST API */ })
+    })
+  })
+
   return {
-    http, queue, outcomes,
+    http, queue, outcomes, dashboard,
     listen: (port) => new Promise((resolve) => http.listen(port, () => resolve((http.address() as { port: number }).port))),
     close: async () => {
+      offEvent()
+      for (const ws of sockets) ws.terminate()
       await new Promise<void>((r) => { http.close(() => r()); http.closeAllConnections?.() })
       await Promise.race([queue.idle(), new Promise((r) => setTimeout(r, 10_000))])
     },

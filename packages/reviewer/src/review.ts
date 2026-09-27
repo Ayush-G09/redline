@@ -12,6 +12,8 @@ export interface ReviewOptions {
   maxTokens?: number
   /** how many prompts may be in flight at once */
   concurrency?: number
+  /** appended to the system prompt as-is (used for learned "don't repeat this" instructions) */
+  extraSystem?: string
   /** how many times to retry a busy or dropped request */
   retries?: number
   /** called before each attempt of each chunk, for visibility into what is happening */
@@ -45,10 +47,11 @@ const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  * review says so in `errors` rather than pretending it found nothing.
  */
 export async function review(client: LlmClient, files: readonly DiffFile[], opts: ReviewOptions = {}): Promise<ReviewResult> {
-  const { title = '(untitled)', budget = client.budgetChars, maxTokens = 4096, concurrency = client.maxConcurrency ?? 4, retries = 3, backoffMs = 1000, maxFindings = 30, sleep = realSleep } = opts
+  const { title = '(untitled)', budget = client.budgetChars, maxTokens = 4096, concurrency = client.maxConcurrency ?? 4, retries = 3, backoffMs = 1000, maxFindings = 30, sleep = realSleep, extraSystem = '' } = opts
   const { chunks, skipped } = chunkDiff(files, title, budget)
   const result: ReviewResult = { findings: [], dropped: [], skipped, errors: [], usage: { inputTokens: 0, outputTokens: 0, requests: 0 } }
   const seen = new Set<string>()
+  const system = extraSystem ? `${SYSTEM_PROMPT}${extraSystem}` : SYSTEM_PROMPT
 
   const emit = (f: Finding) => {
     const key = `${f.path}:${f.line}:${f.kind}`
@@ -66,7 +69,7 @@ export async function review(client: LlmClient, files: readonly DiffFile[], opts
       const take = (items: ReturnType<FindingParser['push']>) => { for (const it of items) 'finding' in it ? emit(it.finding) : result.dropped.push(it.dropped) }
       try {
         result.usage.requests++
-        for await (const ev of client.stream({ system: SYSTEM_PROMPT, user: text, maxTokens, signal: opts.signal })) {
+        for await (const ev of client.stream({ system, user: text, maxTokens, signal: opts.signal })) {
           if (ev.type === 'usage') { result.usage.inputTokens += ev.inputTokens ?? 0; result.usage.outputTokens += ev.outputTokens ?? 0; continue }
           gotText = true
           take(parser.push(ev.text))

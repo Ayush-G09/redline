@@ -136,3 +136,19 @@ describe('review: when the provider misbehaves', () => {
     await expect(review(client, files, { signal: ctl.signal, sleep: noSleep })).rejects.toThrow()
   })
 })
+
+describe('review: extraSystem (learned "do not repeat" instructions)', () => {
+  it('is appended to the system prompt sent to the model', async () => {
+    let seenSystem = ''
+    const capturing = new ScriptedClient((req) => { seenSystem = req.system; return { chunks: [] } })
+    await review(capturing, files, { extraSystem: '\n\nDo not report X again.' })
+    expect(seenSystem).toContain('Do not report X again.')
+    expect(seenSystem.startsWith('You are a careful senior engineer')).toBe(true)
+  })
+  it('leaves the prompt untouched when there is nothing learned yet', async () => {
+    let seenSystem = ''
+    const capturing = new ScriptedClient((req) => { seenSystem = req.system; return { chunks: [] } })
+    await review(capturing, files)
+    expect(seenSystem).not.toContain('do not repeat')
+  })
+})

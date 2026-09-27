@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Redline — live reviews</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #12161f; --line: #232838; --text: #e6e9f0; --muted: #8b93a7;
+    --red: #ef5a6f; --orange: #f0a35d; --yellow: #e7c86a; --green: #6fd19b; --accent: #7c9cf0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .01em; }
+  header h1 b { color: var(--accent); }
+  #status { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  #status i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  #status.on i { background: var(--green); }
+  #status.off i { background: var(--red); }
+  main { max-width: 920px; margin: 0 auto; padding: 20px; display: grid; gap: 14px; }
+  .empty { color: var(--muted); text-align: center; padding: 60px 20px; }
+  .job { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; overflow: hidden; }
+  .job-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .job-head .key { font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--muted); }
+  .job-head .title { font-weight: 600; }
+  .badge { margin-left: auto; font-size: 11px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.live { color: var(--green); border-color: #245; }
+  .badge.done { color: var(--muted); }
+  .badge.incomplete { color: var(--orange); border-color: #542; }
+  .badge.failed { color: var(--red); border-color: #533; }
+  ul.findings { list-style: none; margin: 0; padding: 0; }
+  li.finding { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px 16px; border-top: 1px solid var(--line); align-items: start; }
+  li.finding:first-child { border-top: none; }
+  li.finding.acted { opacity: .55; }
+  .fpath { font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--accent); }
+  .fsev { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+  .fsev.high { background: var(--red); } .fsev.medium { background: var(--orange); } .fsev.low { background: var(--yellow); }
+  .fkind { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-left: 8px; }
+  .fmsg { grid-column: 1 / -1; color: var(--text); }
+  .factions { display: flex; gap: 6px; }
+  button.act { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 7px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  button.act:hover { border-color: var(--accent); color: var(--text); }
+  button.act.accept:hover { border-color: var(--green); color: var(--green); }
+  button.act.dismiss:hover { border-color: var(--red); color: var(--red); }
+  .verdict { font-size: 12px; padding: 4px 10px; }
+  .verdict.accepted { color: var(--green); } .verdict.dismissed { color: var(--red); }
+  footer { max-width: 920px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Red<b>line</b> — live reviews</h1>
+  <span id="status" class="off"><i></i><span id="status-text">connecting…</span></span>
+</header>
+<main id="jobs">
+  <p class="empty">Waiting for a pull request to review…</p>
+</main>
+<footer>Dismissing a comment teaches Redline not to repeat that kind of comment on this project. Accepting can undo an earlier mistaken dismissal.</footer>
+<script>
+(() => {
+  const jobsEl = document.getElementById('jobs')
+  const statusEl = document.getElementById('status')
+  const statusText = document.getElementById('status-text')
+  /** @type {Map<string, {el: HTMLElement, listEl: HTMLElement, title: string}>} */
+  const jobs = new Map()
+  const findingEls = new Map() // id -> <li>
+
+  function ensureJob(key, title) {
+    let j = jobs.get(key)
+    if (j) { if (title) j.title = title; return j }
+    if (jobsEl.querySelector('.empty')) jobsEl.innerHTML = ''
+    const el = document.createElement('section')
+    el.className = 'job'
+    el.innerHTML = `<div class="job-head"><span class="title">${esc(title || key)}</span><span class="key">${esc(key)}</span><span class="badge live">reviewing…</span></div><ul class="findings"></ul>`
+    jobsEl.prepend(el)
+    j = { el, listEl: el.querySelector('.findings'), title: title || key }
+    jobs.set(key, j)
+    return j
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
+
+  function addFinding(key, id, finding, status) {
+    const j = ensureJob(key)
+    const li = document.createElement('li')
+    li.className = 'finding' + (status ? ' acted' : '')
+    li.dataset.id = id
+    const range = finding.endLine && finding.endLine > finding.line ? `${finding.line}–${finding.endLine}` : finding.line
+    li.innerHTML = `
+      <div class="fpath">${esc(finding.path)}:${esc(range)} <span class="fsev ${finding.severity}"></span><span class="fkind">${esc(finding.kind)}</span></div>
+      <div class="factions"></div>
+      <div class="fmsg">${esc(finding.message)}</div>`
+    const actions = li.querySelector('.factions')
+    if (status) {
+      actions.innerHTML = `<span class="verdict ${status}">${status}</span>`
+    } else {
+      const accept = mkBtn('accept', '✓ Accept', () => act(id, 'accept', li))
+      const dismiss = mkBtn('dismiss', '✕ Dismiss', () => act(id, 'dismiss', li))
+      actions.append(accept, dismiss)
+    }
+    j.listEl.prepend(li)
+    findingEls.set(id, li)
+  }
+
+  function mkBtn(cls, label, onClick) {
+    const b = document.createElement('button')
+    b.className = 'act ' + cls
+    b.textContent = label
+    b.onclick = onClick
+    return b
+  }
+
+  async function act(id, verb, li) {
+    li.querySelectorAll('button').forEach((b) => (b.disabled = true))
+    try {
+      const r = await fetch(`/api/findings/${id}/${verb}`, { method: 'POST' })
+      if (!r.ok) throw new Error(await r.text())
+      li.classList.add('acted')
+      li.querySelector('.factions').innerHTML = `<span class="verdict ${verb === 'accept' ? 'accepted' : 'dismissed'}">${verb === 'accept' ? 'accepted' : 'dismissed'}</span>`
+    } catch (e) {
+      li.querySelectorAll('button').forEach((b) => (b.disabled = false))
+      alert('Could not record that: ' + e.message)
+    }
+  }
+
+  function setBadge(key, cls, text) {
+    const j = jobs.get(key)
+    if (!j) return
+    const b = j.el.querySelector('.badge')
+    b.className = 'badge ' + cls
+    b.textContent = text
+  }
+
+  function handle(e) {
+    if (e.type === 'snapshot') { for (const f of e.findings) addFinding(f.key, f.id, f.finding, f.status); return }
+    if (e.type === 'job-start') { ensureJob(e.key, e.title); setBadge(e.key, 'live', 'reviewing…'); return }
+    if (e.type === 'finding') { addFinding(e.key, e.id, e.finding); return }
+    if (e.type === 'job-done') { setBadge(e.key, e.incomplete ? 'incomplete' : 'done', e.incomplete ? 'incomplete' : `${e.comments} comment${e.comments === 1 ? '' : 's'}`); return }
+    if (e.type === 'job-failed') { setBadge(e.key, 'failed', 'failed'); return }
+  }
+
+  function connect() {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/dashboard/live')
+    ws.onopen = () => { statusEl.className = 'on'; statusText.textContent = 'live' }
+    ws.onclose = () => { statusEl.className = 'off'; statusText.textContent = 'reconnecting…'; setTimeout(connect, 2000) }
+    ws.onerror = () => ws.close()
+    ws.onmessage = (m) => { try { handle(JSON.parse(m.data)) } catch { /* ignore a bad frame */ } }
+  }
+  connect()
+})()
+</script>
+</body>
+</html>
