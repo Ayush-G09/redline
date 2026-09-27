@@ -34,7 +34,7 @@ if (useLlm) {
   const { reviewer, stats } = llmReviewer(client)
   name = `Language model (${client.name})`
   const t0 = Date.now()
-  run = await runEval(reviewer, cases, { concurrency: client.maxConcurrency ?? 3 })
+  run = await runEval(reviewer, cases, { concurrency: client.maxConcurrency ?? 3, onProgress: (done, total, id, ms) => console.error(`  [${done}/${total}] ${id} (${(ms / 1000).toFixed(1)}s)`) })
   const secs = ((Date.now() - t0) / 1000).toFixed(0)
   extra = `\n  ${stats.requests} requests, ${stats.inputTokens} input + ${stats.outputTokens} output tokens, ${secs}s`
   const dropped = Object.entries(stats.dropped).map(([k, v]) => `${v} ${k}`).join(', ')

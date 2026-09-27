@@ -59,29 +59,42 @@ export class GeminiClient implements LlmClient {
 
   constructor(o: GeminiOptions) {
     if (!o.apiKey) throw new FatalError('no Gemini API key given')
-    this.o = { model: o.model, apiKey: o.apiKey, baseUrl: (o.baseUrl ?? BASE).replace(/\/$/, ''), timeoutMs: o.timeoutMs ?? 180_000, fetchImpl: o.fetchImpl ?? fetch }
+    // the free tier's streaming endpoint occasionally hangs under load with no response at all; fail that fast so a retry
+    // gets a fresh connection instead of sitting out a long timeout
+    this.o = { model: o.model, apiKey: o.apiKey, baseUrl: (o.baseUrl ?? BASE).replace(/\/$/, ''), timeoutMs: o.timeoutMs ?? 45_000, fetchImpl: o.fetchImpl ?? fetch }
     this.name = `gemini:${o.model}`
     this.budgetChars = o.budgetChars ?? 300_000
   }
 
   async *stream(req: LlmRequest): AsyncGenerator<LlmEvent> {
+    const debug = !!process.env.REDLINE_DEBUG
+    const t0 = Date.now()
     const timeout = AbortSignal.timeout(this.o.timeoutMs)
     const signal = req.signal ? AbortSignal.any([req.signal, timeout]) : timeout
     const model = this.o.model.replace(/^models\//, '')
+    if (debug) console.error(`    [gemini] request start (timeout ${this.o.timeoutMs}ms)`)
     let res: Response
     try {
-      res = await this.o.fetchImpl(`${this.o.baseUrl}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
-        method: 'POST',
-        signal,
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: req.system }] },
-          contents: [{ role: 'user', parts: [{ text: req.user }] }],
-          // room for the model's own reasoning as well as the answer, which count against the same limit
-          generationConfig: { temperature: 0, maxOutputTokens: Math.max(req.maxTokens, 8192) },
+      // belt and suspenders: race the fetch itself against our own timer, in case a hung connection does not honour
+      // the abort signal the way we expect on this platform.
+      const guard = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('local guard timeout')), this.o.timeoutMs + 5000))
+      res = await Promise.race([
+        this.o.fetchImpl(`${this.o.baseUrl}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+          method: 'POST',
+          signal,
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': this.o.apiKey },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: req.system }] },
+            contents: [{ role: 'user', parts: [{ text: req.user }] }],
+            // room for the model's own reasoning as well as the answer, which count against the same limit
+            generationConfig: { temperature: 0, maxOutputTokens: Math.max(req.maxTokens, 8192) },
+          }),
         }),
-      })
+        guard,
+      ])
+      if (debug) console.error(`    [gemini] got response headers after ${Date.now() - t0}ms, status ${res.status}`)
     } catch (e) {
+      if (debug) console.error(`    [gemini] fetch failed after ${Date.now() - t0}ms: ${(e as Error).name} ${(e as Error).message}`)
       throw new RetriableError(`network error: ${(e as Error).name === 'TimeoutError' ? 'timed out' : (e as Error).message}`)
     }
     if (!res.ok) {

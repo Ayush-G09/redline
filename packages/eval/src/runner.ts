@@ -14,15 +14,18 @@ export interface Run {
   results: (CaseResult & { title: string })[]
 }
 
-export async function runEval(review: Reviewer, cases: BuiltCase[] = builtCases(), { concurrency = 1 }: { concurrency?: number } = {}): Promise<Run> {
+export async function runEval(review: Reviewer, cases: BuiltCase[] = builtCases(), { concurrency = 1, onProgress }: { concurrency?: number; onProgress?: (done: number, total: number, id: string, ms: number) => void } = {}): Promise<Run> {
   const results: Run['results'] = new Array(cases.length)
   let next = 0
+  let done = 0
   const worker = async () => {
     while (next < cases.length) {
       const i = next++
       const c = cases[i]
+      const t0 = Date.now()
       const findings = await review(c.files, { id: c.id, title: c.title })
       results[i] = { id: c.id, title: c.title, files: c.files, findings, expected: c.expected }
+      onProgress?.(++done, cases.length, c.id, Date.now() - t0)
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, cases.length) }, worker))

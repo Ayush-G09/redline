@@ -159,11 +159,18 @@ lifetime, that the commit is the pull request's head, that every comment is on a
 | Reviewer | Precision | Recall | F1 |
 | --- | --- | --- | --- |
 | Baseline (pattern rules) | 86% | 44% | 59% |
-| Language model (Gemini / Ollama) | not run yet | | |
+| Ollama, `qwen2.5-coder:3b` (free, fully local) | 33% | 41% | 37% |
 
-It finds what a pattern can (eval, hardcoded keys, SQL by string-joining, `= ` in an `if`) and none of what needs
-understanding (a missing `await`, swapped arguments, an off-by-one, a missing authorization check). It also raises two
-false alarms on the trap cases. Those are the gaps the model has to close.
+The **baseline** finds what a pattern can (eval, hardcoded keys, SQL by string-joining, `= ` in an `if`) and none of what
+needs understanding (a missing `await`, swapped arguments, an off-by-one, a missing authorization check). It also raises
+two false alarms on the trap cases.
+
+The **local model** (a 3B model chosen to fit a 4 GB GPU) understands more of the code — it found real bugs the baseline
+cannot, like a swapped-argument refund and a binary search's fractional midpoint — but it is noisy: it raised a false
+alarm on every one of the 7 clean changes, and made more wrong comments (22) than right ones (11). At this size it is not
+yet a usable reviewer; a bigger local model, or a hosted one, closes the gap. Gemini's free tier gave a clean 100%
+precision on every sample tested so far, but has not yet completed a full run (see the reviewer's own retry and backoff
+handling above, which is exactly what a flaky free tier needs).
 
 ## How the parser is verified
 

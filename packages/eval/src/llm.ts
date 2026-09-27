@@ -15,7 +15,7 @@ export function llmReviewer(client: LlmClient): { reviewer: Reviewer; stats: Llm
   const stats: LlmRunStats = { requests: 0, inputTokens: 0, outputTokens: 0, dropped: {}, errors: [] }
   const results = new Map<string, ReviewResult>()
   const reviewer: Reviewer = async (files, meta) => {
-    const r = await review(client, files, { title: meta.title })
+    const r = await review(client, files, { title: meta.title, onAttempt: (info) => { if (process.env.REDLINE_DEBUG) console.error(`    attempt ${info.attempt} for ${info.files.join(',')}`) } })
     results.set(meta.id, r)
     stats.requests += r.usage.requests
     stats.inputTokens += r.usage.inputTokens

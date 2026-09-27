@@ -14,6 +14,8 @@ export interface ReviewOptions {
   concurrency?: number
   /** how many times to retry a busy or dropped request */
   retries?: number
+  /** called before each attempt of each chunk, for visibility into what is happening */
+  onAttempt?: (info: { files: string[]; attempt: number }) => void
   /** wait before the first retry (ms); doubles each time */
   backoffMs?: number
   /** most comments to return, highest severity first */
@@ -58,6 +60,7 @@ export async function review(client: LlmClient, files: readonly DiffFile[], opts
 
   const runChunk = async (text: string, files: string[]) => {
     for (let attempt = 0; ; attempt++) {
+      opts.onAttempt?.({ files, attempt })
       const parser = new FindingParser(chunkFiles(files), client.name)
       let gotText = false
       const take = (items: ReturnType<FindingParser['push']>) => { for (const it of items) 'finding' in it ? emit(it.finding) : result.dropped.push(it.dropped) }

@@ -7,7 +7,7 @@ export const PROVIDERS = ['gemini', 'ollama', 'anthropic'] as const
 export type Provider = (typeof PROVIDERS)[number]
 
 export const DEFAULT_MODEL: Record<Provider, string> = {
-  gemini: 'gemini-flash-latest',
+  gemini: 'gemini-flash-lite-latest',
   ollama: 'qwen2.5-coder:3b',
   anthropic: 'claude-sonnet-5',
 }
