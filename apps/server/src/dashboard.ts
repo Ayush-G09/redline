@@ -15,7 +15,7 @@ export type DashboardEvent =
   | { type: 'finding'; key: string; id: string; finding: Finding; at: number }
   | { type: 'job-done'; key: string; outcome: string; comments: number; incomplete: boolean; at: number }
   | { type: 'job-failed'; key: string; error: string; at: number }
-  | { type: 'snapshot'; findings: LiveFinding[] }
+  | { type: 'snapshot'; findings: LiveFinding[]; titles: Record<string, string> }
 
 /**
  * Ties three things together for one repository: the live stream of a review in progress (for the dashboard page), a
@@ -26,6 +26,7 @@ export class Dashboard {
   private readonly listeners = new Set<(e: DashboardEvent) => void>()
   private readonly findings = new Map<string, LiveFinding>()
   private readonly order: string[] = []
+  private readonly titles = new Map<string, string>()
   readonly feedback: FeedbackStore
   private readonly maxFindings: number
 
@@ -41,7 +42,7 @@ export class Dashboard {
 
   private emit(e: DashboardEvent) { for (const fn of this.listeners) fn(e) }
 
-  jobStart(key: string, title: string) { this.emit({ type: 'job-start', key, title, at: Date.now() }) }
+  jobStart(key: string, title: string) { this.titles.set(key, title); this.emit({ type: 'job-start', key, title, at: Date.now() }) }
   jobFailed(key: string, error: string) { this.emit({ type: 'job-failed', key, error, at: Date.now() }) }
   jobDone(key: string, outcome: string, comments: number, incomplete: boolean) { this.emit({ type: 'job-done', key, outcome, comments, incomplete, at: Date.now() }) }
 
@@ -71,6 +72,16 @@ export class Dashboard {
   recentFindings(key?: string, limit = 100): LiveFinding[] {
     const all = this.order.map((id) => this.findings.get(id) as LiveFinding).filter((f) => !key || f.key === key)
     return all.slice(-limit)
+  }
+
+  /** The title known for each pull request that has a live finding right now, for a late viewer's snapshot. */
+  recentTitles(): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const key of new Set(this.order.map((id) => (this.findings.get(id) as LiveFinding).key))) {
+      const title = this.titles.get(key)
+      if (title) out[key] = title
+    }
+    return out
   }
 }
 

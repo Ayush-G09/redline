@@ -189,7 +189,7 @@ export function createServer(deps: ServerDeps): RedlineServer {
     wss.handleUpgrade(req, socket, head, (ws) => {
       sockets.add(ws)
       // a fresh viewer sees recent history at once, then live updates as they happen
-      send(ws, { type: 'snapshot', findings: dashboard.recentFindings(undefined, 200) })
+      send(ws, { type: 'snapshot', findings: dashboard.recentFindings(undefined, 200), titles: dashboard.recentTitles() })
       ws.on('close', () => sockets.delete(ws))
       ws.on('error', () => sockets.delete(ws))
       ws.on('message', () => { /* the dashboard only listens; actions go through the REST API */ })

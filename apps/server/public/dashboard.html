@@ -133,7 +133,7 @@
   }
 
   function handle(e) {
-    if (e.type === 'snapshot') { for (const f of e.findings) addFinding(f.key, f.id, f.finding, f.status); return }
+    if (e.type === 'snapshot') { for (const f of e.findings) { ensureJob(f.key, e.titles?.[f.key]); addFinding(f.key, f.id, f.finding, f.status) } return }
     if (e.type === 'job-start') { ensureJob(e.key, e.title); setBadge(e.key, 'live', 'reviewing…'); return }
     if (e.type === 'finding') { addFinding(e.key, e.id, e.finding); return }
     if (e.type === 'job-done') { setBadge(e.key, e.incomplete ? 'incomplete' : 'done', e.incomplete ? 'incomplete' : `${e.comments} comment${e.comments === 1 ? '' : 's'}`); return }
