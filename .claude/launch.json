@@ -1,6 +1,0 @@
-{
-  "version": "0.0.1",
-  "configurations": [
-    { "name": "redline-dashboard-demo", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "demo-server.mts"], "port": 3200 }
-  ]
-}
